@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 생활 비서 - 날씨 알림</title>
+    <!-- Tailwind CSS CDN 로드 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Inter 폰트 사용 */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f7f7;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            user-select: none; /* 사용자 선택 방지 */
+            -webkit-tap-highlight-color: transparent; /* 탭 하이라이트 제거 */
+        }
+        .container {
+            width: 95%;
+            max-width: 1000px; /* 2단 레이아웃을 위해 최대 너비 확장 */
+            min-height: 95vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            align-items: center;
+            padding-top: 20px;
+            padding-bottom: 20px;
+        }
+        .weather-card {
+            cursor: pointer;
+            transition: transform 0.1s ease-in-out, box-shadow 0.2s ease;
+            height: 100%; /* 부모 flex 높이에 맞춤 */
+            min-height: 400px; /* 최소 높이 설정 */
+        }
+        .weather-card:active {
+            transform: scale(0.98);
+        }
+        /* 로딩 스피너 애니메이션 */
+        .spinner {
+            border: 8px solid #f3f3f3;
+            border-top: 8px solid #3b82f6; /* Blue-500 */
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .location-item {
+            padding: 10px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.2s, color 0.2s, box-shadow 0.2s;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+        .location-item:hover:not(.selected) {
+            background-color: #eef2ff; /* indigo-50 */
+        }
+        .location-item.selected {
+            background-color: #3b82f6; /* blue-500 */
+            color: white;
+            font-weight: bold;
+            box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3);
+        }
+        .delete-btn {
+            font-size: 0.8rem;
+            opacity: 0.5;
+            transition: opacity 0.2s;
+        }
+        .location-item:hover .delete-btn {
+            opacity: 1;
+        }
+        .location-item.selected .delete-btn {
+            color: #fff;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1 class="text-3xl font-extrabold text-gray-800 mb-6">AI 날씨 비서</h1>
+
+        <!-- 메인 콘텐츠 영역 (반응형 2단 레이아웃) -->
+        <div class="w-full flex flex-col md:flex-row md:space-x-5 mb-6">
+
+            <!-- 1. 저장된 위치 목록 (즐겨찾기 섹션) - md: 1/3 너비 -->
+            <div class="md:w-1/3 mb-5 md:mb-0 p-4 bg-white rounded-xl shadow-lg border border-gray-200 h-fit">
+                <h2 class="text-xl font-bold text-gray-700 mb-3 border-b pb-2 flex justify-between items-center">
+                    ⭐ 즐겨찾는 위치 (최대 5개)
+                </h2>
+                <div id="saved-locations-list" class="flex flex-col">
+                    <!-- 위치 항목이 여기에 렌더링됩니다 -->
+                </div>
+                <p id="location-tip" class="text-sm text-gray-500 mt-3 p-2 text-center border-t pt-2">
+                    목록에서 위치를 선택하여 날씨를 확인하세요.
+                </p>
+            </div>
+
+            <!-- 2. 메인 날씨 카드 영역 - md: 2/3 너비 -->
+            <div id="weather-card"
+                 class="weather-card bg-white p-6 md:p-12 rounded-3xl shadow-2xl w-full flex flex-col justify-center items-center">
+
+                <!-- 초기 로딩 상태 / 결과 표시 영역 -->
+                <div id="status-display" class="space-y-6 text-center">
+                    <div id="loader" class="spinner mx-auto hidden"></div>
+                    <h2 id="main-message" class="text-3xl md:text-5xl font-bold text-gray-800 transition duration-300">
+                        <span class="text-blue-600">위치</span><br>정보 확인 중...
+                    </h2>
+                    <p id="sub-message" class="text-lg md:text-2xl text-gray-500 mt-4">
+                        잠시만 기다려주세요.
+                    </p>
+                </div>
+
+                <!-- 날씨 결과 표시 영역 (숨겨져 있다가 데이터 로드 후 표시) -->
+                <div id="weather-display" class="hidden space-y-4 text-center">
+                    <p id="location-display" class="text-2xl md:text-4xl font-semibold text-gray-600">위치</p>
+                    <div class="flex items-center justify-center space-x-4">
+                        <span id="icon-display" class="text-7xl md:text-9xl">☀️</span>
+                        <span id="temp-display" class="text-8xl md:text-[120px] font-bold text-blue-700">--°C</span>
+                    </div>
+                    <p id="desc-display" class="text-2xl md:text-4xl font-medium text-gray-700">날씨 요약</p>
+                    <button id="speak-button"
+                            class="mt-6 px-6 py-3 bg-green-500 text-white text-xl font-bold rounded-xl hover:bg-green-600 shadow-lg transition duration-200 transform active:scale-95">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-6 h-6 inline-block mr-2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9.053 9.053 0 0 1 0 12.728l-5.657-5.657a4.526 4.526 0 0 0-6.386 0l-5.657 5.657a9.053 9.053 0 0 1 0-12.728l5.657 5.657a4.526 4.526 0 0 0 6.386 0l5.657-5.657Z" />
+                        </svg>
+                        날씨 브리핑 (터치)
+                    </button>
+                </div>
+
+                <!-- 에러 메시지 표시 영역 -->
+                <p id="error-message" class="hidden text-lg md:text-xl text-red-500 mt-4"></p>
+
+            </div>
+        </div>
+        
+        <!-- 수동 위치 입력 및 저장 폼 -->
+        <div id="manual-input-section" class="w-full max-w-4xl p-5 bg-white rounded-xl shadow-lg border border-gray-200">
+            <h2 class="text-xl font-bold text-gray-700 mb-3 border-b pb-2">📍 새 위치 (좌표) 추가</h2>
+            <div class="flex flex-col md:flex-row space-y-3 md:space-y-0 md:space-x-4 mb-3">
+                <input type="text" id="manual-name" placeholder="위치 이름 (예: 집, 사무실)"
+                       class="flex-1 p-3 border rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                <input type="number" step="any" id="manual-lat" placeholder="위도 (Latitude)"
+                       class="flex-1 p-3 border rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                <input type="number" step="any" id="manual-lon" placeholder="경도 (Longitude)"
+                       class="flex-1 p-3 border rounded-lg focus:ring-blue-500 focus:border-blue-500">
+            </div>
+            <div class="flex justify-end space-x-4">
+                <button id="add-location-button"
+                        class="bg-blue-500 text-white p-3 rounded-lg font-bold hover:bg-blue-600 transition duration-200 shadow-md transform active:scale-95">
+                    위치 목록에 추가
+                </button>
+                <button id="clear-all-button"
+                        class="bg-red-500 text-white p-3 rounded-lg font-bold hover:bg-red-600 transition duration-200 shadow-md transform active:scale-95">
+                    전체 초기화
+                </button>
+            </div>
+            <p id="manual-input-tip" class="text-sm text-gray-500 mt-2">이름과 좌표를 모두 입력하고 '위치 목록에 추가' 버튼을 눌러 즐겨찾기에 등록하세요.</p>
+        </div>
+
+    </div>
+
+    <script>
+        // API 키는 보안상의 이유로 포함하지 않습니다. 사용자님의 OpenWeatherMap 또는 다른 API 키로 교체해야 합니다.
+        // **** 여기에 발급받은 API 키를 정확하게 입력하세요! ****
+        const WEATHER_API_KEY = "여기에 발급받은 API 키를 정확하게 입력"; // <--- 이 부분을 수정하세요
+        const API_URL = "https://api.openweathermap.org/data/2.5/weather";
+
+        // 기본값 설정 (서울 시청)
+        const DEFAULT_LOCATION = { id: 'default', name: "서울 (기본 위치)", lat: 37.5665, lon: 126.9780 };
+        // GPS 위치를 위한 특별 ID
+        const GPS_LOCATION_ID = 'gps'; 
+
+        const MAX_LOCATIONS = 5; // 최대 저장 가능 위치 수 정의
+
+        let userLatitude = null;
+        let userLongitude = null;
+        let weatherData = null; // 날씨 데이터를 저장할 변수
+        let savedLocations = []; // 저장된 모든 위치 목록 (수동 추가된 것만)
+        let activeLocationId = null; // 현재 선택된 위치의 ID
+
+        // DOM 요소 캐시
+        const statusDisplay = document.getElementById('status-display');
+        const weatherDisplay = document.getElementById('weather-display');
+        const mainMessage = document.getElementById('main-message');
+        const subMessage = document.getElementById('sub-message');
+        const loader = document.getElementById('loader');
+        const errorMessage = document.getElementById('error-message');
+        const locationDisplay = document.getElementById('location-display');
+        const tempDisplay = document.getElementById('temp-display');
+        const iconDisplay = document.getElementById('icon-display');
+        const descDisplay = document.getElementById('desc-display');
+        const weatherCard = document.getElementById('weather-card');
+        const speakButton = document.getElementById('speak-button');
+        const savedLocationsList = document.getElementById('saved-locations-list');
+        
+        // 수동 입력 관련 요소
+        const manualNameInput = document.getElementById('manual-name');
+        const manualLatInput = document.getElementById('manual-lat');
+        const manualLonInput = document.getElementById('manual-lon');
+        const addButton = document.getElementById('add-location-button');
+        const clearAllButton = document.getElementById('clear-all-button');
+        
+        // =========================================================================
+        // 1. 위치 목록 관리 (localStorage)
+        // =========================================================================
+
+        /**
+         * localStorage에서 저장된 위치 목록을 로드합니다.
+         */
+        function loadSavedLocations() {
+            const storedList = localStorage.getItem('savedLocations');
+            if (storedList) {
+                savedLocations = JSON.parse(storedList);
+            } else {
+                savedLocations = [];
+            }
+            // 활성화된 위치 ID가 없다면 'default' (서울 기본값)를 기본값으로 설정
+            activeLocationId = localStorage.getItem('activeLocationId') || DEFAULT_LOCATION.id;
+        }
+
+        /**
+         * 현재 위치 목록과 활성화 ID를 localStorage에 저장합니다.
+         */
+        function saveLocationsToStorage() {
+            localStorage.setItem('savedLocations', JSON.stringify(savedLocations));
+            localStorage.setItem('activeLocationId', activeLocationId);
+            renderSavedLocations();
+        }
+
+        /**
+         * 위치 목록 UI를 업데이트합니다.
+         */
+        function renderSavedLocations() {
+            savedLocationsList.innerHTML = '';
+            
+            // 1. 서울(기본) 위치 항목 추가
+            const defaultLocDiv = document.createElement('div');
+            defaultLocDiv.textContent = `🏙️ ${DEFAULT_LOCATION.name}`;
+            defaultLocDiv.className = 'location-item border border-gray-300';
+            defaultLocDiv.onclick = () => selectLocation(DEFAULT_LOCATION.id);
+            
+            if (activeLocationId === DEFAULT_LOCATION.id) {
+                defaultLocDiv.classList.add('selected');
+                defaultLocDiv.textContent = `✅ ${DEFAULT_LOCATION.name}`;
+            } else {
+                 defaultLocDiv.textContent = `🏙️ ${DEFAULT_LOCATION.name}`;
+            }
+            savedLocationsList.appendChild(defaultLocDiv);
+            
+            // 2. 저장된 수동 위치 항목 추가 (즐겨찾기)
+            savedLocations.forEach(loc => {
+                const div = document.createElement('div');
+                div.id = `loc-${loc.id}`;
+                div.className = 'location-item border border-gray-300';
+                div.onclick = () => selectLocation(loc.id);
+
+                const nameSpan = document.createElement('span');
+                nameSpan.textContent = loc.name;
+                
+                // 삭제 버튼 추가
+                const deleteBtn = document.createElement('button');
+                deleteBtn.innerHTML = `&times;`; // X 아이콘
+                deleteBtn.className = 'delete-btn text-red-400 font-bold ml-3 p-1 rounded-full hover:bg-red-500 hover:text-white transition';
+                deleteBtn.title = '위치 삭제';
+                deleteBtn.onclick = (e) => {
+                    e.stopPropagation(); // 버튼 클릭 시 선택 이벤트 방지
+                    removeLocation(loc.id);
+                };
+                
+                div.appendChild(nameSpan);
+                div.appendChild(deleteBtn);
+
+                if (loc.id === activeLocationId) {
+                    div.classList.add('selected');
+                    nameSpan.textContent = `✅ ${loc.name}`;
+                }
+                savedLocationsList.appendChild(div);
+            });
+            
+            // 3. GPS 위치 항목 추가 (가장 마지막 수단)
+            const gpsLocDiv = document.createElement('div');
+            gpsLocDiv.textContent = '🌍 현재 위치 (GPS 시도)';
+            gpsLocDiv.className = 'location-item border border-gray-300';
+            gpsLocDiv.onclick = () => selectLocation(GPS_LOCATION_ID);
+            
+            if (activeLocationId === GPS_LOCATION_ID) {
+                gpsLocDiv.classList.add('selected');
+                gpsLocDiv.textContent = '✅ 현재 위치 (GPS 시도)';
+            }
+            savedLocationsList.appendChild(gpsLocDiv);
+
+            
+            // 5개 제한 알림 업데이트
+            if (savedLocations.length >= MAX_LOCATIONS) {
+                document.getElementById('location-tip').textContent = `⚠️ 최대 ${MAX_LOCATIONS}개의 즐겨찾기가 저장되었습니다.`;
+                addButton.disabled = true;
+                addButton.classList.replace('bg-blue-500', 'bg-gray-400');
+            } else {
+                document.getElementById('location-tip').textContent = `새 위치를 추가하거나 목록에서 선택하세요. (최대 5개 저장)`;
+                addButton.disabled = false;
+                addButton.classList.replace('bg-gray-400', 'bg-blue-500');
+            }
+        }
+        
+        /**
+         * 위치를 목록에서 선택하고 날씨를 불러옵니다.
+         */
+        function selectLocation(id) {
+            activeLocationId = id;
+            saveLocationsToStorage(); // activeLocationId 갱신 및 UI 다시 그리기
+            initializeApp(); // 선택된 위치로 앱 재시작
+            
+            let messageName;
+            if (id === GPS_LOCATION_ID) {
+                messageName = '현재 위치 (GPS)';
+            } else if (id === DEFAULT_LOCATION.id) {
+                messageName = DEFAULT_LOCATION.name;
+            } else {
+                messageName = savedLocations.find(loc => loc.id === id)?.name || '알 수 없음';
+            }
+            showTemporaryError(`✅ 새로운 위치가 선택되었습니다: ${messageName}`);
+        }
+        
+        /**
+         * 위치를 목록에서 삭제합니다.
+         */
+        function removeLocation(idToRemove) {
+            savedLocations = savedLocations.filter(loc => loc.id !== idToRemove);
+            
+            // 삭제된 위치가 활성화된 위치였다면 서울(기본)으로 전환
+            if (activeLocationId === idToRemove) {
+                activeLocationId = DEFAULT_LOCATION.id;
+            }
+            saveLocationsToStorage();
+            initializeApp();
+            showTemporaryError("✅ 위치가 즐겨찾기 목록에서 삭제되었습니다.");
+        }
+
+        /**
+         * 수동으로 입력된 좌표를 목록에 추가합니다.
+         */
+        function handleAddLocation() {
+            // 5개 제한 체크
+            if (savedLocations.length >= MAX_LOCATIONS) {
+                showTemporaryError(`⚠️ 즐겨찾기는 최대 ${MAX_LOCATIONS}개까지만 저장할 수 있습니다. 기존 위치를 삭제하고 다시 시도하세요.`);
+                return;
+            }
+            
+            const name = manualNameInput.value.trim();
+            const lat = parseFloat(manualLatInput.value);
+            const lon = parseFloat(manualLonInput.value);
+
+            if (!name) {
+                showTemporaryError("⚠️ 위치 이름을 입력해주세요.");
+                return;
+            }
+
+            if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+                showTemporaryError("⚠️ 유효한 위도(-90 ~ 90)와 경도(-180 ~ 180)를 입력해주세요.");
+                return;
+            }
+            
+            // 새로운 위치 객체 생성
+            const newLocation = {
+                id: Date.now().toString(), // 고유 ID 부여
+                name: name,
+                lat: lat,
+                lon: lon
+            };
+
+            // 목록에 추가하고 활성화
+            savedLocations.push(newLocation);
+            activeLocationId = newLocation.id;
+            
+            saveLocationsToStorage();
+            
+            // 입력창 초기화
+            manualNameInput.value = '';
+            manualLatInput.value = '';
+            manualLonInput.value = '';
+            
+            // 저장 후 앱 재초기화
+            initializeApp();
+            showTemporaryError(`✅ "${newLocation.name}"이(가) 즐겨찾기에 추가되었습니다.`);
+        }
+        
+        /**
+         * 모든 저장된 위치 정보를 삭제하고 서울(기본)으로 전환합니다.
+         */
+        function handleClearAll() {
+            localStorage.removeItem('savedLocations');
+            activeLocationId = DEFAULT_LOCATION.id;
+            saveLocationsToStorage();
+            showTemporaryError("✅ 모든 즐겨찾기 위치가 삭제되었습니다. 서울(기본 위치)로 전환됩니다.");
+            initializeApp();
+        }
+        
+        /**
+         * 하단에 임시 오류 메시지를 표시합니다. (alert 대체)
+         */
+        function showTemporaryError(message) {
+            errorMessage.textContent = message;
+            errorMessage.classList.remove('hidden');
+            // 기존의 오류 메시지를 즉시 숨기지 않고, 새로운 메시지가 들어오면 덮어쓰도록 5초 후에 숨김
+            setTimeout(() => {
+                if(errorMessage.textContent === message) {
+                    errorMessage.classList.add('hidden');
+                }
+            }, 5000);
+        }
+
+        // =========================================================================
+        // 2. 날씨 및 GPS 로직
+        // =========================================================================
+        
+        /**
+         * 날씨 코드에 따른 아이콘 및 한국어 설명 매핑
+         */
+        function getWeatherDetails(id) {
+            let icon = '❓'; // 기본값
+            let description = '알 수 없음';
+            let category = 'etc'; // 멘트 생성을 위한 카테고리
+
+            if (id >= 200 && id < 300) { icon = '⛈️'; description = '천둥번개'; category = 'thunder'; }
+            else if (id >= 300 && id < 400) { icon = '🌧️'; description = '이슬비'; category = 'rain'; }
+            else if (id >= 500 && id < 600) { icon = '☔'; description = '비'; category = 'rain'; }
+            else if (id >= 600 && id < 700) { icon = '❄️'; description = '눈'; category = 'snow'; }
+            else if (id >= 700 && id < 800) { icon = '🌫️'; description = '안개/흐림'; category = 'atmosphere'; }
+            else if (id === 800) { icon = '☀️'; description = '맑음'; category = 'clear'; }
+            else if (id === 801) { icon = '🌤️'; description = '구름 조금'; category = 'cloud'; }
+            else if (id > 801) { icon = '☁️'; description = '구름 많음'; category = 'cloud'; }
+
+            return { icon, description, category };
+        }
+
+        /**
+         * 위치 정보를 가져옵니다. (위치 권한 필요)
+         */
+        function getGeolocation() {
+            return new Promise((resolve, reject) => {
+                if (!navigator.geolocation) {
+                    reject('이 브라우저는 위치 정보를 지원하지 않습니다.');
+                    return;
+                }
+
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        // userLatitude/Longitude 업데이트는 여기서 하지 않고,
+                        // 호출부에서 처리하여 상태 일관성 유지
+                        resolve({ lat: position.coords.latitude, lon: position.coords.longitude });
+                    },
+                    (error) => {
+                        let msg = `GPS 접근 실패: ${error.message}.`;
+                        reject(msg);
+                    },
+                    { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+                );
+            });
+        }
+
+        /**
+         * OpenWeatherMap API를 사용하여 날씨 정보를 가져옵니다.
+         */
+        async function fetchWeather(locationName) {
+            if (!WEATHER_API_KEY || WEATHER_API_KEY === "발급받은키를 여기에 붙여넣으세요") {
+                throw new Error("API 키를 입력해주세요. OpenWeatherMap에서 발급받을 수 있습니다.");
+            }
+            if (!userLatitude || !userLongitude) {
+                throw new Error("위치 정보가 설정되지 않았습니다.");
+            }
+
+            const url = `${API_URL}?lat=${userLatitude}&lon=${userLongitude}&appid=${WEATHER_API_KEY}&units=metric&lang=kr`;
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error("날씨 API 응답 오류 상세:", errorText);
+                    throw new Error(`날씨 API 응답 오류: ${response.status} (키 문제 또는 서버 오류)`);
+                }
+                const data = await response.json();
+                
+                // 필요한 데이터 추출
+                const temp = Math.round(data.main.temp);
+                // API에서 가져온 이름이 있다면 그걸 사용하거나, 입력받은 locationName 사용
+                const finalName = data.name || locationName; 
+                
+                const weatherId = data.weather[0].id;
+                const { icon, description, category } = getWeatherDetails(weatherId);
+
+                weatherData = { temp, name: finalName, description, icon, category };
+                
+                // 화면 업데이트
+                locationDisplay.textContent = finalName;
+                tempDisplay.textContent = `${temp}°C`;
+                descDisplay.textContent = description;
+                iconDisplay.textContent = icon;
+
+            } catch (error) {
+                console.error("날씨 정보 가져오기 오류:", error);
+                throw new Error(`날씨 정보를 불러올 수 없습니다: ${error.message}`);
+            }
+        }
+
+        /**
+         * Text-to-Speech (TTS) API를 사용하여 날씨 정보를 음성으로 출력합니다.
+         */
+        function speakWeather() {
+            if (!weatherData) {
+                showTemporaryError("날씨 정보가 준비되지 않았습니다. 잠시 후 다시 시도해주세요.");
+                return;
+            }
+
+            const { temp, name, description, category } = weatherData;
+            
+            // 시간대별 맞춤 인사말
+            const hour = new Date().getHours();
+            let greeting;
+            if (hour >= 5 && hour < 12) {
+                greeting = "좋은 아침입니다! ";
+            } else if (hour >= 12 && hour < 18) {
+                greeting = "안녕하세요. ";
+            } else if (hour >= 18 && hour < 22) {
+                greeting = "저녁 시간입니다. ";
+            } else {
+                greeting = "늦은 시간입니다. ";
+            }
+
+            // 날씨 카테고리에 따른 추가 멘트
+            let advice = "";
+            switch(category) {
+                case 'rain':
+                    advice = "외출 시 우산을 꼭 챙기세요. ";
+                    break;
+                case 'snow':
+                    advice = "길이 미끄러울 수 있으니 조심하세요. ";
+                    break;
+                case 'thunder':
+                    advice = "천둥번개가 예상됩니다. 안전에 유의하세요. ";
+                    break;
+                case 'clear':
+                    advice = "화창한 날씨네요. 기분 좋은 하루 보내세요! ";
+                    break;
+                case 'atmosphere':
+                    advice = "미세먼지나 안개에 주의하세요. ";
+                    break;
+                default:
+                    advice = "";
+            }
+
+
+            // TTS 메시지 생성
+            const message = `${greeting}${name}의 현재 날씨를 알려드릴게요. 현재 기온은 ${temp}도이며, 날씨는 ${description}입니다. ${advice}`;
+
+            // TTS 실행
+            if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance(message);
+                utterance.lang = 'ko-KR'; // 한국어 설정
+                utterance.rate = 1.0;     // 말하는 속도
+                utterance.volume = 1.0;   // 볼륨
+
+                // 이미 말하는 중이라면 중지하고 새로 시작
+                if (speechSynthesis.speaking) {
+                    speechSynthesis.cancel();
+                }
+                
+                speechSynthesis.speak(utterance);
+            } else {
+                console.warn("이 브라우저는 TTS를 지원하지 않습니다.");
+                showTemporaryError("TTS(음성 안내)가 지원되지 않는 브라우저입니다.");
+            }
+        }
+        
+        // =========================================================================
+        // 3. 앱 초기화 및 시작
+        // =========================================================================
+
+        /**
+         * 앱 초기화 및 데이터 로드
+         */
+        async function initializeApp() {
+            // UI 초기화 및 로딩 시작
+            loader.classList.remove('hidden');
+            errorMessage.classList.add('hidden');
+            mainMessage.classList.remove('text-red-500'); 
+            weatherDisplay.classList.add('hidden');
+            statusDisplay.classList.remove('hidden');
+            
+            // 위치 데이터 로드 및 UI 업데이트
+            loadSavedLocations();
+            renderSavedLocations();
+
+            let locationToFetch = null;
+            let locationName = null;
+            
+            if (activeLocationId === DEFAULT_LOCATION.id) {
+                // 1. 초기/기본 선택: 서울 (기본값) 사용
+                locationToFetch = DEFAULT_LOCATION;
+                locationName = DEFAULT_LOCATION.name;
+                
+            } else if (activeLocationId === GPS_LOCATION_ID) {
+                // 2. 사용자가 GPS를 명시적으로 선택한 경우
+                locationName = "현재 위치";
+                mainMessage.textContent = "현재 위치 확인 중...";
+                subMessage.textContent = "GPS를 통해 위치를 찾습니다. 권한 요청에 응답해주세요.";
+                
+                try {
+                    const pos = await getGeolocation();
+                    locationToFetch = { lat: pos.lat, lon: pos.lon, name: "현재 위치 (GPS)" };
+                } catch(geoError) {
+                    console.warn("Geolocation 실패:", geoError);
+                    
+                    // GPS 실패 시 강제적으로 서울(기본)으로 전환하고 재시작
+                    activeLocationId = DEFAULT_LOCATION.id;
+                    saveLocationsToStorage(); 
+                    showTemporaryError(`⚠️ ${geoError}. 서울(기본 위치)로 자동 전환됩니다.`);
+                    initializeApp(); // 기본 위치로 재시작
+                    return;
+                }
+                
+            } else {
+                // 3. 즐겨찾기 목록에서 선택된 경우
+                locationToFetch = savedLocations.find(loc => loc.id === activeLocationId);
+                
+                if (!locationToFetch) {
+                     // activeLocationId가 유효하지 않은 경우 (예: 삭제된 위치가 active였을 경우)
+                     activeLocationId = DEFAULT_LOCATION.id;
+                     saveLocationsToStorage();
+                     initializeApp(); // 재귀 호출로 기본 위치 로직 다시 실행
+                     return;
+                }
+                locationName = locationToFetch.name;
+            }
+            
+            // 공통: 날씨 API 호출을 위해 userLatitude/Longitude 설정
+            userLatitude = locationToFetch.lat;
+            userLongitude = locationToFetch.lon;
+
+            // 4. 날씨 정보 가져오기 시도
+            try {
+                mainMessage.textContent = `${locationName} 날씨 로딩 중...`;
+                await fetchWeather(locationName);
+
+                // 5. 성공 시 화면 전환 및 음성 브리핑
+                statusDisplay.classList.add('hidden');
+                weatherDisplay.classList.remove('hidden');
+                speakWeather(); 
+
+            } catch (error) {
+                console.error("초기화 실패:", error);
+                
+                // 에러 발생 시 UI 업데이트
+                loader.classList.add('hidden');
+                statusDisplay.classList.remove('hidden');
+                weatherDisplay.classList.add('hidden');
+                
+                mainMessage.textContent = "오류 발생";
+                mainMessage.classList.add('text-red-500');
+                
+                const errorDetail = error.message.includes('API 키') 
+                                        ? "API 키를 설정했는지, 그리고 키가 활성화되었는지 확인해 주세요."
+                                        : error.message;
+
+                subMessage.textContent = errorDetail;
+                showTemporaryError("⚠️ API 키를 확인하거나 수동 위치를 추가해 보세요.");
+                
+            } finally {
+                loader.classList.add('hidden');
+            }
+        }
+
+        // 앱 시작
+        window.onload = initializeApp;
+        
+        // 이벤트 리스너 연결
+        weatherCard.addEventListener('click', speakWeather);
+        speakButton.addEventListener('click', (e) => {
+            e.stopPropagation(); // 버튼 클릭 시 카드 클릭 이벤트 중복 방지
+            speakWeather();
+        });
+        
+        addButton.addEventListener('click', handleAddLocation);
+        clearAllButton.addEventListener('click', handleClearAll);
+
+    </script>
+</body>
+</html>
