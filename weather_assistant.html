@@ -681,19 +681,32 @@
             }
         }
 
-        // 앱 시작
+        // 앱 시작 (기존 코드를 유지)
         window.onload = initializeApp;
         
-        // 이벤트 리스너 연결
-        weatherCard.addEventListener('click', speakWeather);
+        // 이벤트 리스너 연결 (이 부분을 아래처럼 수정)
+        // weatherCard.addEventListener('click', speakWeather); // 기존 코드 (음성만)
+        
+        // *** 수정할 부분 시작: 카드 클릭 시 날씨 정보 갱신 후 브리핑 (initializeApp 호출)
+        function handleWeatherCardClick(e) {
+            e.stopPropagation(); // 버튼 클릭 시 카드 클릭 이벤트 중복 방지
+            // 날씨 정보 갱신 및 브리핑을 위해 앱 재시작
+            initializeApp(); 
+        }
+        
+        // 메인 날씨 카드 클릭 시 갱신 및 브리핑
+        weatherCard.addEventListener('click', handleWeatherCardClick);
+        
+        // 날씨 브리핑 버튼 클릭 시 갱신 및 브리핑
         speakButton.addEventListener('click', (e) => {
             e.stopPropagation(); // 버튼 클릭 시 카드 클릭 이벤트 중복 방지
-            speakWeather();
+            initializeApp(); // 갱신 및 브리핑
         });
+        // *** 수정할 부분 끝
         
         addButton.addEventListener('click', handleAddLocation);
         clearAllButton.addEventListener('click', handleClearAll);
-
-    </script>
+        
+        </script>
 </body>
 </html>
